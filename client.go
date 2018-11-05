@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	backoff "gopkg.in/cenkalti/backoff.v1"
+	"gopkg.in/cenkalti/backoff.v1"
 )
 
 var (
@@ -34,6 +34,7 @@ type Client struct {
 	EncodingBase64 bool
 	EventID        string
 	mu             sync.Mutex
+	withRetry      bool
 }
 
 // NewClient creates a new client
@@ -43,6 +44,17 @@ func NewClient(url string) *Client {
 		Connection: &http.Client{},
 		Headers:    make(map[string]string),
 		subscribed: make(map[chan *Event]chan bool),
+	}
+}
+
+// NewClient creates a new client without retry logic
+func NewClientWithoutRetry(url string) *Client {
+	return &Client{
+		URL:        url,
+		Connection: &http.Client{},
+		Headers:    make(map[string]string),
+		subscribed: make(map[chan *Event]chan bool),
+		withRetry:  false,
 	}
 }
 
@@ -83,19 +95,19 @@ func (c *Client) Subscribe(stream string, handler func(msg *Event)) error {
 }
 
 // SubscribeChan sends all events to the provided channel
-func (c *Client) SubscribeChan(stream string, ch chan *Event) error {
+func (c *Client) SubscribeChan(stream string, ch chan *Event) (io.Closer, error) {
 	c.subscribed[ch] = make(chan bool)
 
-	operation := func() error {
+	operation := func() (io.Closer, error) {
 		resp, err := c.request(stream)
 		if err != nil {
 			c.cleanup(resp, ch)
-			return err
+			return nil, err
 		}
 
 		if resp.StatusCode != 200 {
 			c.cleanup(resp, ch)
-			return errors.New("could not connect to stream")
+			return nil, errors.New("could not connect to stream")
 		}
 
 		reader := NewEventStreamReader(resp.Body)
@@ -128,10 +140,17 @@ func (c *Client) SubscribeChan(stream string, ch chan *Event) error {
 			}
 		}()
 
-		return nil
+		return resp.Body, nil
 	}
 
-	return backoff.Retry(operation, backoff.NewExponentialBackOff())
+	if c.withRetry {
+		return nil, backoff.Retry(func() error {
+			_, err := operation()
+			return err
+		}, backoff.NewExponentialBackOff())
+	}
+
+	return operation()
 }
 
 // SubscribeRaw to an sse endpoint
@@ -140,7 +159,7 @@ func (c *Client) SubscribeRaw(handler func(msg *Event)) error {
 }
 
 // SubscribeChanRaw sends all events to the provided channel
-func (c *Client) SubscribeChanRaw(ch chan *Event) error {
+func (c *Client) SubscribeChanRaw(ch chan *Event) (io.Closer, error) {
 	return c.SubscribeChan("", ch)
 }
 

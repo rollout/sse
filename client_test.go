@@ -69,7 +69,7 @@ func TestClient(t *testing.T) {
 
 		Convey("It should receive events", func() {
 			events := make(chan *Event)
-			err := c.SubscribeChan("test", events)
+			_, err := c.SubscribeChan("test", events)
 			So(err, ShouldBeNil)
 
 			for i := 0; i < 5; i++ {
@@ -86,7 +86,7 @@ func TestClient(t *testing.T) {
 
 		Convey("It should shutdown gracefully", func() {
 			events := make(chan *Event)
-			err := c.SubscribeChan("test", events)
+			_, err := c.SubscribeChan("test", events)
 			So(err, ShouldBeNil)
 
 			time.Sleep(time.Millisecond * 500)
